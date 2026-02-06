@@ -1,0 +1,130 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+backend/venv/
+ENV/
+.claude/
+
+# Python config
+*.pyc
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# =========================
+# Node.js
+# =========================
+node_modules/
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn
+
+# =========================
+# IDE / Editors
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+
+# =========================
+# OS Files
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# =========================
+# Environment & Secrets
+# =========================
+.env
+.env.local
+.env.production
+.env.*.local
+backend/app/config.json
+
+# =========================
+# Docker
+# =========================
+docker-compose.override.yml
+
+# =========================
+# Test / Generated XML files
+# =========================
+*.xml
+!frontend/src/**/*.xml
+CLEAN_ECG_FOR_IA.xml
+FINAL_CONVERSION.xml
+TEST_REUSSI.xml
+
+# =========================
+# Data / Workspace
+# =========================
+DEEPECG_WORK/
+*.npy
+*.parquet
+*.base64
+*.hdf5
+*.h5
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# HuggingFace cache
+# =========================
+.hf/
+
+# =========================
+# Misc
+# =========================
+.claude/
+*.bak
+*.tmp
+*.temp
+nul
+# Dev/test scripts
+IMPROVEMENTS.md
+ecgtypeanalyser.py
+test.py
+
+# Legacy/unused modules
+backend/app/ai_engine_client.py
+frontend/src/components/AnalyzePanel.tsx
+frontend/src/components/ConnectionTestPanel.tsx
+frontend/src/components/DockerControlPanel.tsx
+frontend/src/components/MedicalDisclaimer.tsx
+frontend/src/components/PreprocessingPanel.tsx
+frontend/src/components/ResultsPanel.tsx
+frontend/src/components/StatusBanner.tsx
+frontend/src/components/UploadCard.tsx
