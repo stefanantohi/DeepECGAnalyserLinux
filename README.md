@@ -1,4 +1,6 @@
 # DeepECGAnalyser
+<img width="941" height="668" alt="image" src="https://github.com/user-attachments/assets/40427f59-070d-4b27-a2a7-f45f91265e58" />
+
 
 **AI-Powered ECG Analysis Platform using HeartWise Foundation Models**
 
