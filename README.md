@@ -1,8 +1,15 @@
 # DeepECGAnalyser
+<img width="941" height="668" alt="image" src="https://github.com/user-attachments/assets/40427f59-070d-4b27-a2a7-f45f91265e58" />
+
 
 **AI-Powered ECG Analysis Platform using HeartWise Foundation Models**
 
 Local-first medical AI application for 12-lead ECG interpretation. Leverages the [HeartWise DeepECG Docker](https://github.com/HeartWise-AI/DeepECG_Docker) engine with EfficientNet and WCR (self-supervised) architectures across 77 diagnostic classes. All processing happens locally on your machine with GPU acceleration - no cloud, no external APIs, complete data privacy.
+
+<img width="713" height="519" alt="image" src="https://github.com/user-attachments/assets/f9a59634-a283-40c1-82b3-27657dc82a51" />
+
+<img width="674" height="577" alt="image" src="https://github.com/user-attachments/assets/a5d796b0-aed8-43c6-bbf8-f9d394b63589" />
+
 
 ---
 
