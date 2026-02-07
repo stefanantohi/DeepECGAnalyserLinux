@@ -712,16 +712,33 @@ const ECGAnalysisPanel: React.FC<ECGAnalysisPanelProps> = ({ aiEngineReady }) =>
               </div>
             )}
 
-            {/* Info for XML files */}
+            {/* Info for XML files + supported formats */}
             {isXmlFile && (
               <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl">
                 <div className="flex items-center gap-2 text-blue-700">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <span className="text-sm font-medium">
-                    Fichier XML détecté - Prétraitement automatique
+                    Fichier XML - Conversion automatique vers GE MUSE si nécessaire
                   </span>
+                </div>
+                <div className="mt-2 ml-7">
+                  <table className="text-xs text-gray-600 w-full">
+                    <thead>
+                      <tr className="text-left text-gray-500">
+                        <th className="pr-3 pb-1 font-medium">Format</th>
+                        <th className="pr-3 pb-1 font-medium">Constructeur</th>
+                        <th className="pb-1 font-medium">Conversion</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr><td className="pr-3 py-0.5 font-semibold text-green-700">GE MUSE RestingECG</td><td className="pr-3">GE Healthcare</td><td><span className="text-green-600">Natif</span></td></tr>
+                      <tr><td className="pr-3 py-0.5">Philips PageWriter / TC</td><td className="pr-3">Philips</td><td>Repbeats + resampling</td></tr>
+                      <tr><td className="pr-3 py-0.5">HL7 aECG (Annotated ECG)</td><td className="pr-3">Standard FDA</td><td>Digits + scale uV</td></tr>
+                      <tr><td className="pr-3 py-0.5">CardiologyXML</td><td className="pr-3">Générique</td><td>Base64 int16</td></tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
             )}

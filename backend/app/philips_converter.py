@@ -267,6 +267,10 @@ def create_muse_xml(lead_data: Dict[str, List[int]], patient_info: Dict[str, str
     """
     Create GE MUSE RestingECG format XML from extracted lead data.
 
+    HeartWise Docker expects TWO Waveform sections:
+    - Index 0: Median (~600 samples, representative beat)
+    - Index 1: Rhythm (~5000 samples, 10-second strip)
+
     Args:
         lead_data: Dictionary mapping lead names to sample lists
         patient_info: Patient information dictionary
@@ -278,13 +282,20 @@ def create_muse_xml(lead_data: Dict[str, List[int]], patient_info: Dict[str, str
         GE MUSE RestingECG XML string
     """
     target_samples = (target_rate * target_duration_ms) // 1000
+    # Median beat: ~1.2 seconds at 500Hz = 600 samples
+    median_samples = 600
 
-    # Process waveforms
+    # Process waveforms for Rhythm (10s strip)
     processed_leads = {}
+    # Keep original repbeat data for Median section
+    median_leads = {}
     for lead_name in LEAD_ORDER_8:
         if lead_name in lead_data:
             samples = lead_data[lead_name]
             resampled = resample_waveform(samples, original_rate, target_rate)
+            # Median: use the repbeat data directly (truncate/pad to 600 samples)
+            median_leads[lead_name] = extend_to_duration(resampled, median_samples)
+            # Rhythm: extend to 10s
             extended = extend_to_duration(resampled, target_samples)
             processed_leads[lead_name] = extended
 
@@ -329,7 +340,51 @@ def create_muse_xml(lead_data: Dict[str, List[int]], patient_info: Dict[str, str
     xml_parts.append('      <ECGSampleExponent>0</ECGSampleExponent>')
     xml_parts.append('   </RestingECGMeasurements>')
 
-    # Waveform section (Rhythm - 10 second strip)
+    # Waveform section 0: Median (representative beat ~600 samples)
+    # HeartWise expects this at index 0
+    median_byte_count = median_samples * 2
+
+    xml_parts.append('   <Waveform>')
+    xml_parts.append('      <WaveformType>Median</WaveformType>')
+    xml_parts.append('      <WaveformStartTime>0</WaveformStartTime>')
+    xml_parts.append(f'      <NumberofLeads>{len(median_leads)}</NumberofLeads>')
+    xml_parts.append('      <SampleType>REPRESENTATIVE_BEAT</SampleType>')
+    xml_parts.append(f'      <SampleBase>{target_rate}</SampleBase>')
+    xml_parts.append('      <SampleExponent>0</SampleExponent>')
+    xml_parts.append('      <HighPassFilter>5</HighPassFilter>')
+    xml_parts.append('      <LowPassFilter>150</LowPassFilter>')
+    xml_parts.append('      <ACFilter>60</ACFilter>')
+
+    for lead_name in LEAD_ORDER_8:
+        if lead_name in median_leads:
+            samples = median_leads[lead_name]
+            b64_data = encode_muse_waveform(samples)
+            crc = calculate_crc32(samples)
+
+            xml_parts.append('      <LeadData>')
+            xml_parts.append(f'         <LeadByteCountTotal>{median_byte_count}</LeadByteCountTotal>')
+            xml_parts.append('         <LeadTimeOffset>0</LeadTimeOffset>')
+            xml_parts.append(f'         <LeadSampleCountTotal>{median_samples}</LeadSampleCountTotal>')
+            xml_parts.append('         <LeadAmplitudeUnitsPerBit>4.88</LeadAmplitudeUnitsPerBit>')
+            xml_parts.append('         <LeadAmplitudeUnits>MICROVOLTS</LeadAmplitudeUnits>')
+            xml_parts.append('         <LeadHighLimit>32767</LeadHighLimit>')
+            xml_parts.append('         <LeadLowLimit>-32768</LeadLowLimit>')
+            xml_parts.append(f'         <LeadID>{lead_name}</LeadID>')
+            xml_parts.append('         <LeadOffsetFirstSample>0</LeadOffsetFirstSample>')
+            xml_parts.append('         <FirstSampleBaseline>0</FirstSampleBaseline>')
+            xml_parts.append('         <LeadSampleSize>2</LeadSampleSize>')
+            xml_parts.append('         <LeadOff>FALSE</LeadOff>')
+            xml_parts.append('         <BaselineSway>FALSE</BaselineSway>')
+            xml_parts.append(f'         <LeadDataCRC32>{crc}</LeadDataCRC32>')
+            xml_parts.append('         <WaveFormData>')
+            xml_parts.append(b64_data)
+            xml_parts.append('         </WaveFormData>')
+            xml_parts.append('      </LeadData>')
+
+    xml_parts.append('   </Waveform>')
+
+    # Waveform section 1: Rhythm (10-second strip)
+    # HeartWise reads this at index 1 for MHI format
     byte_count = target_samples * 2
 
     xml_parts.append('   <Waveform>')
@@ -343,7 +398,6 @@ def create_muse_xml(lead_data: Dict[str, List[int]], patient_info: Dict[str, str
     xml_parts.append('      <LowPassFilter>150</LowPassFilter>')
     xml_parts.append('      <ACFilter>60</ACFilter>')
 
-    # Add lead data
     for lead_name in LEAD_ORDER_8:
         if lead_name in processed_leads:
             samples = processed_leads[lead_name]

@@ -10,6 +10,7 @@ interface ECGSignalData {
   sample_rate: number;
   duration_seconds: number;
   data: Record<string, number[]>;
+  heart_rate?: number;
   error?: string;
 }
 
@@ -314,6 +315,11 @@ const ECGViewer: React.FC<ECGViewerProps> = ({ filename = 'ecg.xml', onClose }) 
           <p className="text-sm text-gray-400">
             {signalData.duration_seconds.toFixed(1)}s @ {signalData.sample_rate}Hz |
             25mm/s | 10mm/mV
+            {signalData.heart_rate && (
+              <span className="ml-2 text-green-400 font-semibold">
+                | FC: {signalData.heart_rate} bpm
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3">

@@ -33,6 +33,7 @@ from .ai_client import predict_from_xml, check_health, AIEngineError
 from .settings import settings, ensure_workspace, WORKSPACE_SUBDIRS
 from .ecg_analysis import detect_and_convert_encoding
 from .philips_converter import auto_convert_if_philips
+from .ecg_normalizer import normalize_to_muse
 from .utils import (
     generate_request_id,
     ensure_temp_directory,
@@ -275,6 +276,13 @@ async def get_available_models() -> ECGModelsResponse:
     )
 
 
+@router.get("/ecg/supported-formats")
+async def get_supported_formats():
+    """Get list of supported ECG file formats with conversion details."""
+    from .ecg_normalizer import SUPPORTED_FORMATS
+    return {"formats": SUPPORTED_FORMATS}
+
+
 @router.post("/ecg/full-analysis", response_model=FullECGAnalysisResponse)
 async def run_full_ecg_analysis(
     file: UploadFile = File(...),
@@ -373,8 +381,15 @@ async def run_full_ecg_analysis(
             logger.warning(f"Philips file detected but conversion failed: {philips_msg}")
             file_format_info["conversion_notes"] = f"Conversion échouée: {philips_msg}"
         else:
-            # Not Philips, check if it's GE MUSE or other supported format
-            file_format_info["original_format"] = "ge_muse"  # Assume GE MUSE if not Philips
+            # Not Philips - try universal normalizer (CardiologyXML, single-waveform MUSE, etc.)
+            normalized, norm_format, norm_msg = normalize_to_muse(ecg_file_path)
+            if normalized:
+                logger.info(f"ECG normalization: {norm_msg}")
+                file_format_info["original_format"] = norm_format
+                file_format_info["conversions_applied"].append(f"Format: {norm_format} → GE MUSE")
+                file_format_info["conversion_notes"] = norm_msg
+            else:
+                file_format_info["original_format"] = norm_format if norm_format != "unknown" else "ge_muse"
     elif ext == '.npy':
         file_format_info["original_format"] = "numpy"
 
@@ -594,7 +609,15 @@ async def run_batch_ecg_analysis(
                     logger.warning(f"Philips file {filename} detected but conversion failed: {philips_msg}")
                     batch_format_info["conversion_notes"] = f"Conversion échouée: {philips_msg}"
                 else:
-                    batch_format_info["original_format"] = "ge_muse"
+                    # Not Philips - try universal normalizer
+                    normalized, norm_format, norm_msg = normalize_to_muse(ecg_file_path)
+                    if normalized:
+                        logger.info(f"ECG normalization for {filename}: {norm_msg}")
+                        batch_format_info["original_format"] = norm_format
+                        batch_format_info["conversions_applied"].append(f"Format: {norm_format} → GE MUSE")
+                        batch_format_info["conversion_notes"] = norm_msg
+                    else:
+                        batch_format_info["original_format"] = norm_format if norm_format != "unknown" else "ge_muse"
             elif ext == '.npy':
                 batch_format_info["original_format"] = "numpy"
 
@@ -875,6 +898,32 @@ async def _get_signal_from_base64(base64_path: str) -> dict:
         return {"error": str(e), "success": False}
 
 
+def _calculate_heart_rate(leads_data: dict, sample_rate: float) -> int | None:
+    """Calculate heart rate from R-peaks in lead II (or I as fallback)."""
+    hr_lead = 'II' if 'II' in leads_data else ('I' if 'I' in leads_data else None)
+    if not hr_lead or sample_rate <= 0 or len(leads_data.get(hr_lead, [])) <= sample_rate:
+        return None
+    try:
+        import numpy as np
+        signal = np.array(leads_data[hr_lead])
+        min_distance = int(sample_rate * 0.4)  # Min 0.4s between beats
+        threshold = np.mean(signal) + 0.5 * np.std(signal)
+        peaks = []
+        for i in range(1, len(signal) - 1):
+            if signal[i] > threshold and signal[i] > signal[i-1] and signal[i] > signal[i+1]:
+                if not peaks or (i - peaks[-1]) >= min_distance:
+                    peaks.append(i)
+        if len(peaks) >= 2:
+            rr_intervals = np.diff(peaks) / sample_rate
+            mean_rr = np.mean(rr_intervals)
+            hr = round(60.0 / mean_rr)
+            logger.info(f"Heart rate from {hr_lead}: {hr} bpm ({len(peaks)} R-peaks)")
+            return hr
+    except Exception as e:
+        logger.warning(f"Heart rate calculation failed: {e}")
+    return None
+
+
 async def _parse_xml_waveform(xml_path: str, filename: str) -> dict:
     """
     Parse ECG waveform data from XML file.
@@ -895,25 +944,248 @@ async def _parse_xml_waveform(xml_path: str, filename: str) -> dict:
         sample_rate = 500  # Default
         samples_per_lead = 0
 
+        # Detect if this is CardiologyXML format
+        root_tag = root.tag.split('}')[-1] if '}' in root.tag else root.tag
+        is_cardiology_xml = root_tag.lower() == 'cardiologyxml'
+        is_hl7_aecg = root_tag.lower() == 'annotatedecg' or 'urn:hl7-org:v3' in root.tag
+        is_philips = root_tag.lower() == 'restingecgdata' or 'medical.philips.com' in root.tag
+
         # Try to get sample rate from XML
         for sr_elem in root.iter():
-            if 'SampleRate' in sr_elem.tag or sr_elem.tag.endswith('SampleRate'):
+            tag = sr_elem.tag.split('}')[-1] if '}' in sr_elem.tag else sr_elem.tag
+            if tag in ('SampleRate', 'SamplingRate'):
                 try:
                     sample_rate = int(sr_elem.text)
                 except:
                     pass
                 break
 
-        # Find Waveform elements - use rhythm leads (first waveform section)
-        waveform_elem = None
+        if is_cardiology_xml:
+            # CardiologyXML: <LeadData lead="I"><WaveformData>...</WaveformData></LeadData>
+            for lead_elem in root.iter('LeadData'):
+                lead_name = lead_elem.get('lead', '')
+                if not lead_name:
+                    continue
+
+                wf_elem = lead_elem.find('WaveformData')
+                if wf_elem is None or not wf_elem.text:
+                    continue
+
+                try:
+                    raw_bytes = base64.b64decode(''.join(wf_elem.text.split()))
+                    num_samples = len(raw_bytes) // 2
+                    samples = struct.unpack(f'<{num_samples}h', raw_bytes)
+                    # CardiologyXML uses raw ADC values, convert to mV
+                    # Assume 4.88 uV/bit (standard GE MUSE resolution)
+                    mv_data = [s * 4.88 / 1000.0 for s in samples]
+
+                    if lead_name in standard_leads:
+                        leads_data[lead_name] = mv_data
+                        samples_per_lead = max(samples_per_lead, len(mv_data))
+                    else:
+                        leads_data[lead_name] = mv_data
+                except Exception as e:
+                    logger.warning(f"Failed to parse CardiologyXML lead {lead_name}: {e}")
+
+            if leads_data:
+                available_leads = [l for l in standard_leads if l in leads_data]
+                duration_seconds = samples_per_lead / sample_rate if sample_rate > 0 else 0
+                logger.info(f"Parsed CardiologyXML: {len(leads_data)} leads, {samples_per_lead} samples at {sample_rate}Hz")
+                result = {
+                    "success": True,
+                    "filename": filename,
+                    "leads": available_leads,
+                    "samples_per_lead": samples_per_lead,
+                    "original_samples": samples_per_lead,
+                    "sample_rate": sample_rate,
+                    "duration_seconds": duration_seconds,
+                    "data": leads_data,
+                    "source": "xml"
+                }
+                heart_rate = _calculate_heart_rate(leads_data, sample_rate)
+                if heart_rate is not None:
+                    result["heart_rate"] = heart_rate
+                return result
+            return {"error": "No waveform data found in CardiologyXML", "success": False}
+
+        if is_hl7_aecg:
+            # HL7 aECG: <sequence> with <code code="MDC_ECG_LEAD_X"/> and <digits>
+            ns = ''
+            if '}' in root.tag:
+                ns = root.tag.split('}')[0] + '}'
+
+            for sequence in root.iter(f'{ns}sequence'):
+                code_elem = sequence.find(f'{ns}code')
+                if code_elem is None:
+                    continue
+                code_val = code_elem.get('code', '')
+
+                # Extract sample rate from TIME_ABSOLUTE
+                if code_val == 'TIME_ABSOLUTE':
+                    value_elem = sequence.find(f'{ns}value')
+                    if value_elem is not None:
+                        inc_elem = value_elem.find(f'{ns}increment')
+                        if inc_elem is not None:
+                            try:
+                                inc_val = float(inc_elem.get('value', '0.002'))
+                                if inc_val > 0:
+                                    sample_rate = int(round(1.0 / inc_val))
+                            except (ValueError, ZeroDivisionError):
+                                pass
+                    continue
+
+                if not code_val.startswith('MDC_ECG_LEAD_'):
+                    continue
+
+                lead_name = code_val.replace('MDC_ECG_LEAD_', '')
+                value_elem = sequence.find(f'{ns}value')
+                if value_elem is None:
+                    continue
+
+                scale_val = 1.0
+                scale_elem = value_elem.find(f'{ns}scale')
+                if scale_elem is not None:
+                    try:
+                        scale_val = float(scale_elem.get('value', '1.0'))
+                    except ValueError:
+                        pass
+
+                origin_val = 0.0
+                origin_elem = value_elem.find(f'{ns}origin')
+                if origin_elem is not None:
+                    try:
+                        origin_val = float(origin_elem.get('value', '0'))
+                    except ValueError:
+                        pass
+
+                digits_elem = value_elem.find(f'{ns}digits')
+                if digits_elem is None or not digits_elem.text:
+                    continue
+
+                try:
+                    raw_digits = [int(d) for d in digits_elem.text.strip().split()]
+                    # Convert to mV: (digit * scale + origin) uV -> mV
+                    mv_data = [(d * scale_val + origin_val) / 1000.0 for d in raw_digits]
+                    if lead_name in standard_leads:
+                        leads_data[lead_name] = mv_data
+                        samples_per_lead = max(samples_per_lead, len(mv_data))
+                    else:
+                        leads_data[lead_name] = mv_data
+                except Exception as e:
+                    logger.warning(f"Failed to parse HL7 aECG lead {lead_name}: {e}")
+
+            if leads_data:
+                available_leads = [l for l in standard_leads if l in leads_data]
+                duration_seconds = samples_per_lead / sample_rate if sample_rate > 0 else 0
+                logger.info(f"Parsed HL7 aECG: {len(leads_data)} leads, {samples_per_lead} samples at {sample_rate}Hz")
+                result = {
+                    "success": True,
+                    "filename": filename,
+                    "leads": available_leads,
+                    "samples_per_lead": samples_per_lead,
+                    "original_samples": samples_per_lead,
+                    "sample_rate": sample_rate,
+                    "duration_seconds": duration_seconds,
+                    "data": leads_data,
+                    "source": "xml"
+                }
+                heart_rate = _calculate_heart_rate(leads_data, sample_rate)
+                if heart_rate is not None:
+                    result["heart_rate"] = heart_rate
+                return result
+            return {"error": "No waveform data found in HL7 aECG", "success": False}
+
+        if is_philips:
+            # Philips PageWriter: <repbeats><repbeat leadname="I"><waveform duration="1200">base64</waveform></repbeat>
+            ns = ''
+            if '}' in root.tag:
+                ns = root.tag.split('}')[0] + '}'
+
+            # Get sample rate and resolution from repbeats attributes
+            repbeats_elem = root.find(f'.//{ns}repbeats')
+            philips_sr = 1000
+            philips_res = 1.0
+            if repbeats_elem is not None:
+                try:
+                    philips_sr = int(repbeats_elem.get('samplespersec', '1000'))
+                except ValueError:
+                    pass
+                try:
+                    philips_res = float(repbeats_elem.get('resolution', '1.0'))
+                except ValueError:
+                    pass
+
+            for repbeat in root.iter(f'{ns}repbeat'):
+                lead_name = repbeat.get('leadname', '')
+                if not lead_name:
+                    continue
+                wf_elem = repbeat.find(f'{ns}waveform')
+                if wf_elem is None or not wf_elem.text:
+                    continue
+                try:
+                    raw_bytes = base64.b64decode(''.join(wf_elem.text.split()))
+                    num_samples = len(raw_bytes) // 2
+                    samples = struct.unpack(f'<{num_samples}h', raw_bytes)
+                    # Convert to mV: sample * resolution (uV) / 1000
+                    mv_data = [s * philips_res / 1000.0 for s in samples]
+                    if lead_name in standard_leads:
+                        leads_data[lead_name] = mv_data
+                        samples_per_lead = max(samples_per_lead, len(mv_data))
+                    else:
+                        leads_data[lead_name] = mv_data
+                except Exception as e:
+                    logger.warning(f"Failed to parse Philips repbeat lead {lead_name}: {e}")
+
+            if leads_data:
+                sample_rate = philips_sr
+                available_leads = [l for l in standard_leads if l in leads_data]
+                duration_seconds = samples_per_lead / sample_rate if sample_rate > 0 else 0
+                logger.info(f"Parsed Philips repbeats: {len(leads_data)} leads, {samples_per_lead} samples at {sample_rate}Hz")
+                result = {
+                    "success": True,
+                    "filename": filename,
+                    "leads": available_leads,
+                    "samples_per_lead": samples_per_lead,
+                    "original_samples": samples_per_lead,
+                    "sample_rate": sample_rate,
+                    "duration_seconds": duration_seconds,
+                    "data": leads_data,
+                    "source": "xml"
+                }
+                heart_rate = _calculate_heart_rate(leads_data, sample_rate)
+                if heart_rate is not None:
+                    result["heart_rate"] = heart_rate
+                return result
+            return {"error": "No waveform data found in Philips XML", "success": False}
+
+        # GE MUSE format: Find Waveform elements - prefer Rhythm (longest) over Median
+        waveform_candidates = []
         for elem in root.iter():
             if 'Waveform' in elem.tag:
+                has_leads = False
                 for ld in elem.iter():
                     if 'LeadData' in ld.tag or ld.tag.endswith('LeadData'):
-                        waveform_elem = elem
+                        has_leads = True
                         break
-                if waveform_elem:
+                if has_leads:
+                    # Check WaveformType
+                    wf_type = None
+                    for child in elem:
+                        tag_name = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+                        if tag_name == 'WaveformType':
+                            wf_type = child.text
+                            break
+                    waveform_candidates.append((elem, wf_type))
+
+        waveform_elem = None
+        if waveform_candidates:
+            # Prefer Rhythm section; fallback to last (longest) Waveform
+            for wf, wf_type in waveform_candidates:
+                if wf_type and 'Rhythm' in wf_type:
+                    waveform_elem = wf
                     break
+            if waveform_elem is None:
+                waveform_elem = waveform_candidates[-1][0]
 
         if waveform_elem is None:
             return {"error": "No Waveform element found in XML", "success": False}
@@ -992,7 +1264,7 @@ async def _parse_xml_waveform(xml_path: str, filename: str) -> dict:
 
         logger.info(f"Parsed {len(leads_data)} leads, {samples_per_lead} samples at {sample_rate}Hz ({duration_seconds:.2f}s)")
 
-        return {
+        result = {
             "success": True,
             "filename": filename,
             "leads": available_leads,
@@ -1003,6 +1275,10 @@ async def _parse_xml_waveform(xml_path: str, filename: str) -> dict:
             "data": leads_data,
             "source": "xml"
         }
+        heart_rate = _calculate_heart_rate(leads_data, sample_rate)
+        if heart_rate is not None:
+            result["heart_rate"] = heart_rate
+        return result
 
     except ET.ParseError as e:
         logger.error(f"XML parse error: {e}")
@@ -1032,13 +1308,18 @@ async def get_ecg_signal_data(filename: str = "ecg.xml"):
     specific_backup = os.path.join(ecg_signals_dir, f"original_{filename}")
     logger.info(f"Looking for specific backup: {specific_backup}")
     if os.path.exists(specific_backup):
-        return await _parse_xml_waveform(specific_backup, filename)
+        result = await _parse_xml_waveform(specific_backup, filename)
+        if result.get("success"):
+            return result
+        logger.warning(f"Backup parse failed ({result.get('error', 'unknown')}), trying converted file")
 
-    # Try specified filename (exact match)
+    # Try specified filename (exact match) - may be the converted GE MUSE version
     xml_path = os.path.join(ecg_signals_dir, filename)
     logger.info(f"Checking specified file: {xml_path} (exists: {os.path.exists(xml_path)})")
     if os.path.exists(xml_path):
-        return await _parse_xml_waveform(xml_path, filename)
+        result = await _parse_xml_waveform(xml_path, filename)
+        if result.get("success"):
+            return result
 
     # Fallback: find the most recent original backup file
     original_xml_files = sorted(
