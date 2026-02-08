@@ -387,7 +387,7 @@ This application uses the HeartWise AI engine. If you use it, please cite:
 
 ## License
 
-This project is proprietary and confidential. All rights reserved.
+Ce projet est sous licence **GPL v3**. Voir le fichier [LICENSE](LICENSE) pour plus de détails.
 
 ---
 
