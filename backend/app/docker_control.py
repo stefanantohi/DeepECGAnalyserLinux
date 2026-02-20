@@ -56,8 +56,15 @@ class SystemDiagnostics:
     platform_info: Dict[str, str] = field(default_factory=dict)
 
 
-def _run_command(cmd: List[str], timeout: int = 30) -> tuple[int, str, str]:
-    """Run a command and return (returncode, stdout, stderr)."""
+def _run_command(cmd: List[str], timeout: int = 30, silent: bool = False) -> tuple[int, str, str]:
+    """Run a command and return (returncode, stdout, stderr).
+
+    Args:
+        cmd: Command and arguments to run.
+        timeout: Seconds before the command is killed.
+        silent: When True, suppress warning-level logs for expected failures
+                (e.g. optional tool not installed).
+    """
     try:
         # Build kwargs for subprocess.run
         kwargs = {
@@ -78,13 +85,16 @@ def _run_command(cmd: List[str], timeout: int = 30) -> tuple[int, str, str]:
 
         return result.returncode, result.stdout.strip() if result.stdout else "", result.stderr.strip() if result.stderr else ""
     except subprocess.TimeoutExpired:
-        logger.warning(f"Command timed out: {' '.join(cmd)}")
+        if not silent:
+            logger.warning(f"Command timed out: {' '.join(cmd)}")
         return -1, "", "Command timed out"
     except FileNotFoundError:
-        logger.warning(f"Command not found: {cmd[0]}")
+        if not silent:
+            logger.debug(f"Command not found: {cmd[0]}")
         return -1, "", f"Command not found: {cmd[0]}"
     except Exception as e:
-        logger.error(f"Command error: {e}")
+        if not silent:
+            logger.error(f"Command error: {e}")
         return -1, "", str(e)
 
 
@@ -126,9 +136,14 @@ async def get_docker_status() -> DockerStatus:
         if code == 0 and stdout and "Up" in stdout:
             status.container_running = True
 
-        # Check GPU availability (quick check with nvidia-smi on host)
-        code, _, _ = _run_command(["nvidia-smi", "-L"], timeout=5)
+        # Check GPU availability (quick check with nvidia-smi on host).
+        # Use silent=True because nvidia-smi absence is expected on CPU-only machines.
+        code, _, _ = _run_command(["nvidia-smi", "-L"], timeout=5, silent=True)
         status.gpu_available = code == 0
+        if status.gpu_available:
+            logger.info("GPU detected via nvidia-smi")
+        else:
+            logger.debug("No GPU detected (nvidia-smi unavailable or no devices) — will run on CPU")
 
     except Exception as e:
         logger.error(f"Error checking Docker status: {e}", exc_info=True)
@@ -179,12 +194,17 @@ async def start_ai_engine(
         _run_command(["docker", "rm", "-f", CONTAINER_NAME], timeout=10)
 
     # Build docker run command:
-    # docker run --gpus all -p 8001:8001 deepecg
     # NOTE: Do NOT mount volume to /workspace as it would overwrite the app files!
     cmd = ["docker", "run", "-d", "--name", CONTAINER_NAME]
 
-    # Always try with GPU (--gpus all)
-    cmd.extend(["--gpus", "all"])
+    # Only add GPU flag when a GPU is actually detected on the host.
+    # This avoids a failing GPU attempt followed by a CPU retry on machines
+    # without nvidia drivers / nvidia-container-toolkit.
+    if status.gpu_available:
+        logger.info("GPU available — starting container with --gpus all")
+        cmd.extend(["--gpus", "all"])
+    else:
+        logger.info("No GPU detected — starting container in CPU-only mode")
 
     # Port mapping (not used for batch processing, but keep for compatibility)
     # cmd.extend(["-p", f"{AI_ENGINE_PORT}:{AI_ENGINE_PORT}"])
@@ -218,17 +238,16 @@ async def start_ai_engine(
         code, stdout, stderr = _run_command(cmd, timeout=60)
 
     if code != 0:
-        # If GPU fails, try without GPU
-        if "gpu" in stderr.lower() or "nvidia" in stderr.lower():
-            logger.warning("GPU failed, retrying without GPU...")
-            
+        # If a GPU run somehow fails (e.g. toolkit misconfigured), fall back to CPU.
+        if status.gpu_available and ("gpu" in stderr.lower() or "nvidia" in stderr.lower()):
+            logger.warning("GPU attempt failed, retrying without GPU...")
+
             # Clean up failed container from GPU attempt
             _run_command(["docker", "rm", "-f", CONTAINER_NAME], timeout=10)
-            
+
             cmd = ["docker", "run", "-d", "--name", CONTAINER_NAME]
             if workspace_path:
                 cmd.extend(["-v", f"{workspace_path}:/data"])
-                # Also mount patched file for CPU fallback
                 import os
                 patched_file = os.path.join(workspace_path, "ecg_signal_processor.py")
                 if os.path.exists(patched_file):
@@ -640,9 +659,9 @@ async def run_diagnostics() -> SystemDiagnostics:
         ))
         diagnostics.overall_status = "fail"
 
-    # Test 3: GPU Support (check nvidia-smi on host)
+    # Test 3: GPU Support (check nvidia-smi on host — optional, CPU-only machines will show warning)
     start = time.time()
-    code, stdout, _ = _run_command(["nvidia-smi", "-L"], timeout=5)
+    code, stdout, _ = _run_command(["nvidia-smi", "-L"], timeout=5, silent=True)
     duration = (time.time() - start) * 1000
 
     if code == 0:
