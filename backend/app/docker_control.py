@@ -210,10 +210,21 @@ async def start_ai_engine(
     # Run container
     code, stdout, stderr = _run_command(cmd, timeout=60)
 
+    # Check for name conflict (container exists but wasn't detected/removed)
+    if code != 0 and ("Conflict" in stderr or "is already in use" in stderr):
+        logger.warning(f"Conflict detected: Container {CONTAINER_NAME} already exists. forcing removal and retrying...")
+        _run_command(["docker", "rm", "-f", CONTAINER_NAME], timeout=20)
+        await asyncio.sleep(2)
+        code, stdout, stderr = _run_command(cmd, timeout=60)
+
     if code != 0:
         # If GPU fails, try without GPU
         if "gpu" in stderr.lower() or "nvidia" in stderr.lower():
             logger.warning("GPU failed, retrying without GPU...")
+            
+            # Clean up failed container from GPU attempt
+            _run_command(["docker", "rm", "-f", CONTAINER_NAME], timeout=10)
+            
             cmd = ["docker", "run", "-d", "--name", CONTAINER_NAME]
             if workspace_path:
                 cmd.extend(["-v", f"{workspace_path}:/data"])

@@ -47,6 +47,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["api"])
 
 
+@router.get("")
+@router.get("/")
+async def api_root():
+    """Root /api endpoint — returns available sub-routes."""
+    return {
+        "name": "DeepECG API",
+        "endpoints": {
+            "health": "/api/health",
+            "analyze": "/api/analyze",
+            "config": "/api/config",
+            "ecg_full_analysis": "/api/ecg/full-analysis",
+            "ecg_models": "/api/ecg/available-models",
+            "ecg_parse_existing": "/api/ecg/parse-existing",
+            "ecg_signal_data": "/api/ecg/signal-data",
+            "ai_health": "/api/ai/health",
+            "docker_status": "/api/docker/status",
+            "docker_start": "/api/docker/start",
+            "docker_stop": "/api/docker/stop",
+        }
+    }
+
+
 @router.post("/analyze", response_model=AnalysisResponse)
 async def analyze_pdf(file: UploadFile = File(...)) -> AnalysisResponse:
     """

@@ -4,7 +4,7 @@ import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -69,6 +69,7 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
+    redirect_slashes=False,  # Avoid 307 redirects for trailing-slash URLs
 )
 
 # Configure CORS
@@ -160,6 +161,13 @@ app.include_router(router)
 app.include_router(ai_router)
 app.include_router(docker_router)
 app.include_router(ecg_router)
+
+
+# Suppress browser favicon 404 noise
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Return empty response for browser favicon requests."""
+    return Response(status_code=204)
 
 
 # Root endpoint

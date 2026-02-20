@@ -159,7 +159,7 @@ class Settings(BaseSettings):
     LOG_FORMAT: str = "json"  # Options: "json" or "text"
 
     # Workspace settings (for Docker volume mounts)
-    WORKSPACE_PATH: str = r"C:\Users\benoi\Documents\CODAGE\DEEPECG_WORK"
+    WORKSPACE_PATH: str = os.path.join(os.getcwd(), "workspace_data")
 
     def update_workspace_path(self, new_path: str) -> dict:
         """Update workspace path, persist to config.json, and ensure directories exist."""
