@@ -557,7 +557,7 @@ export const getAvailableECGModels = async (): Promise<ECGModelsAvailableRespons
 export const runFullECGAnalysis = async (
   file: File,
   models: string[] = ['all'],
-  useGpu: boolean = true,
+  useGpu: boolean = false,
   patientId?: string
 ): Promise<FullECGAnalysisResponse> => {
   const formData = new FormData();

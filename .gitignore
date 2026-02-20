@@ -93,6 +93,7 @@ DEEPECG_WORK/
 *.base64
 *.hdf5
 *.h5
+workspace_data/
 
 # =========================
 # Logs

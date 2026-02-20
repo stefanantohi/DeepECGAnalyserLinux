@@ -23,13 +23,13 @@ router = APIRouter(prefix="/api/ecg", tags=["ECG Analysis"])
 # Request/Response Models
 class PredictRequest(BaseModel):
     """Single model prediction request."""
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = {"protected_namespaces": ()}
     model_id: str
 
 
 class PredictResponse(BaseModel):
     """Single model prediction response."""
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = {"protected_namespaces": ()}
     success: bool
     model_id: str
     model_name: str
@@ -47,7 +47,7 @@ class ScreeningRequest(BaseModel):
 
 class ModelResult(BaseModel):
     """Individual model result in screening."""
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = {"protected_namespaces": ()}
     model_id: str
     model_name: str
     success: bool
