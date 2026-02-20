@@ -749,7 +749,7 @@ async def run_single_model(
     model_id: str,
     csv_path: str,
     workspace_path: str,
-    use_gpu: bool = True,
+    use_gpu: bool = False,
     timeout: int = 600
 ) -> Dict[str, Any]:
     """
@@ -929,7 +929,7 @@ async def run_full_ecg_analysis(
     patient_id: str,
     workspace_path: str,
     selected_models: List[str],
-    use_gpu: bool = True
+    use_gpu: bool = False
 ) -> Dict[str, Any]:
     """
     Run complete ECG analysis pipeline with selected models.

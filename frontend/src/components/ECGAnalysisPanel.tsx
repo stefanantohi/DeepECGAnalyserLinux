@@ -45,7 +45,7 @@ const ECGAnalysisPanel: React.FC<ECGAnalysisPanelProps> = ({ aiEngineReady }) =>
   } | null>(null);
 
   // Pipeline options
-  const [useGpu, setUseGpu] = useState(true);
+  const [useGpu, setUseGpu] = useState(false);
 
   // ECG Viewer
   const [showECGViewer, setShowECGViewer] = useState(false);

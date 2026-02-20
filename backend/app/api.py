@@ -309,7 +309,7 @@ async def get_supported_formats():
 async def run_full_ecg_analysis(
     file: UploadFile = File(...),
     models: str = Form(default="all"),
-    use_gpu: bool = Form(default=True),
+    use_gpu: bool = Form(default=False),
     patient_id: Optional[str] = Form(default=None)
 ) -> FullECGAnalysisResponse:
     """
@@ -532,7 +532,7 @@ async def run_full_ecg_analysis(
 async def run_batch_ecg_analysis(
     files: List[UploadFile] = File(...),
     models: str = Form(default="all"),
-    use_gpu: bool = Form(default=True)
+    use_gpu: bool = Form(default=False)
 ) -> BatchECGAnalysisResponse:
     """
     Run ECG analysis on multiple files (batch processing).
