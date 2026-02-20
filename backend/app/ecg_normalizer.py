@@ -595,6 +595,12 @@ def _convert_hl7_aecg(xml_path: str) -> Tuple[bool, str]:
                     if inc_elem is not None:
                         try:
                             inc_val = float(inc_elem.get('value', '0.002'))
+                            inc_unit = inc_elem.get('unit', 's').lower()
+                            # Normalize to seconds
+                            if inc_unit == 'ms':
+                                inc_val = inc_val / 1000.0
+                            elif inc_unit == 'us':
+                                inc_val = inc_val / 1_000_000.0
                             if inc_val > 0:
                                 sample_rate = int(round(1.0 / inc_val))
                         except (ValueError, ZeroDivisionError):
