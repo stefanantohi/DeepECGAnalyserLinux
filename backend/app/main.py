@@ -67,8 +67,8 @@ app = FastAPI(
     version=settings.APP_VERSION,
     description="Local medical AI application for PDF analysis",
     lifespan=lifespan,
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None,
+    docs_url="/docs",
+    redoc_url="/redoc",
     redirect_slashes=False,  # Avoid 307 redirects for trailing-slash URLs
 )
 
