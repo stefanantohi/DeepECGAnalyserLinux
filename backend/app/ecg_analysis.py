@@ -979,9 +979,24 @@ async def run_full_ecg_analysis(
     batch_dir = os.path.join(workspace_path, "outputs", "batch_1")
     os.makedirs(batch_dir, exist_ok=True)
 
-    # NOTE: 8-to-12 lead expansion is NOT needed - Docker HeartWise handles this internally
-    # The Docker can process 8-lead files (I, II, V1-V6) and calculates derived leads itself
-    # Keeping expand_8_to_12_leads function for potential future use but not calling it here
+    # Ensure the HuggingFace API key is available inside the container at /data/api_key.json.
+    # The container mounts workspace_path as /data, so we copy the key there.
+    api_key_dest = os.path.join(workspace_path, "api_key.json")
+    api_key_src = settings.HUGGING_FACE_API_KEY_PATH
+    if api_key_src and os.path.exists(api_key_src):
+        try:
+            shutil.copy2(api_key_src, api_key_dest)
+            logger.info(f"Copied API key from {api_key_src} to {api_key_dest}")
+        except Exception as e:
+            logger.warning(f"Failed to copy API key: {e}")
+    elif not os.path.exists(api_key_dest):
+        results["success"] = False
+        results["error"] = (
+            f"HuggingFace API key not found. "
+            f"Expected at '{api_key_src or 'api.key.json / api_key.json'}' or already present in workspace. "
+            "Set HUGGING_FACE_API_KEY_PATH env var or place api.key.json in the project root."
+        )
+        return results
 
     # Determine which models to run
     if "all" in selected_models:

@@ -17,6 +17,26 @@ CONFIG_FILE = Path(__file__).parent / "config.json"
 WORKSPACE_SUBDIRS = ["ecg_signals", "inputs", "outputs", "preprocessing"]
 
 
+def _find_api_key_file() -> str:
+    """
+    Search for api.key.json or api_key.json walking up from the current
+    working directory. Returns the first match, or an empty string if not found.
+    """
+    candidates = ["api.key.json", "api_key.json"]
+    # Start at cwd and walk up to 5 levels
+    current = Path(os.getcwd())
+    for _ in range(6):
+        for name in candidates:
+            candidate = current / name
+            if candidate.exists():
+                return str(candidate)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return ""
+
+
 def load_config() -> dict:
     """Load persistent configuration from config.json."""
     if CONFIG_FILE.exists():
@@ -161,6 +181,11 @@ class Settings(BaseSettings):
     # Workspace settings (for Docker volume mounts)
     WORKSPACE_PATH: str = os.path.join(os.getcwd(), "workspace_data")
 
+    # HuggingFace API key file path (used by Docker HeartWise engine).
+    # Searched automatically if left empty; override via env var HUGGING_FACE_API_KEY_PATH
+    # or persist it through the /api/config endpoint.
+    HUGGING_FACE_API_KEY_PATH: str = _find_api_key_file()
+
     def update_workspace_path(self, new_path: str) -> dict:
         """Update workspace path, persist to config.json, and ensure directories exist."""
         object.__setattr__(self, 'WORKSPACE_PATH', new_path)
@@ -194,3 +219,5 @@ settings = Settings()
 _persisted = load_config()
 if "workspace_path" in _persisted:
     object.__setattr__(settings, 'WORKSPACE_PATH', _persisted["workspace_path"])
+if "hugging_face_api_key_path" in _persisted:
+    object.__setattr__(settings, 'HUGGING_FACE_API_KEY_PATH', _persisted["hugging_face_api_key_path"])
